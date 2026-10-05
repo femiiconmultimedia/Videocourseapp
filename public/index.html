@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Class — Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+  .card { background: #fff; padding: 40px; border-radius: 14px; width: 100%; max-width: 400px;
+          box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+  h1 { font-size: 24px; margin-bottom: 6px; }
+  .sub { color: #777; font-size: 14px; margin-bottom: 24px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tabs button { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer;
+                 font-weight: 600; background: #eee; color: #555; }
+  .tabs button.active { background: #667eea; color: #fff; }
+  label { display: block; font-size: 13px; font-weight: 600; color: #444; margin: 14px 0 6px; }
+  input { width: 100%; padding: 11px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; }
+  input:focus { outline: 2px solid #667eea55; border-color: #667eea; }
+  .btn { width: 100%; margin-top: 22px; padding: 12px; border: none; border-radius: 8px; cursor: pointer;
+         background: #667eea; color: #fff; font-size: 16px; font-weight: 600; }
+  .btn:hover { background: #5a6fd6; }
+  .error { background: #fdecea; color: #b3261e; padding: 10px 12px; border-radius: 8px;
+           font-size: 14px; margin-top: 16px; display: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>📚 My Class</h1>
+    <p class="sub">Register or log in to access your 2 video courses.</p>
+
+    <div class="tabs">
+      <button id="tabLogin" class="active" onclick="switchTab('login')">Log in</button>
+      <button id="tabRegister" onclick="switchTab('register')">Register</button>
+    </div>
+
+    <form id="authForm">
+      <label for="email">Email</label>
+      <input id="email" type="email" required autocomplete="email" placeholder="you@example.com">
+
+      <label for="password">Password</label>
+      <input id="password" type="password" required minlength="6" autocomplete="current-password" placeholder="••••••••">
+
+      <button class="btn" type="submit" id="submitBtn">Log in</button>
+    </form>
+
+    <div class="error" id="error"></div>
+  </div>
+
+<script>
+let mode = 'login';
+
+function switchTab(m) {
+  mode = m;
+  document.getElementById('tabLogin').classList.toggle('active', m === 'login');
+  document.getElementById('tabRegister').classList.toggle('active', m === 'register');
+  document.getElementById('submitBtn').textContent = m === 'login' ? 'Log in' : 'Create account';
+  hideError();
+}
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+function hideError() { document.getElementById('error').style.display = 'none'; }
+
+// If already logged in, go straight to the dashboard
+fetch('/api/me').then(r => { if (r.ok) location.href = '/app.html'; });
+
+document.getElementById('authForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  hideError();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  try {
+    const res = await fetch(mode === 'login' ? '/api/login' : '/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) return showError(data.error || 'Something went wrong.');
+    location.href = '/app.html';
+  } catch {
+    showError('Network error — is the server running?');
+  }
+});
+</script>
+</body>
+</html>

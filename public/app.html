@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Class — Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { background: #f4f5fb; min-height: 100vh; }
+  header { background: #fff; padding: 14px 24px; display: flex; justify-content: space-between;
+           align-items: center; box-shadow: 0 1px 4px rgba(0,0,0,.08); position: sticky; top: 0; }
+  header h1 { font-size: 20px; }
+  header .right { display: flex; align-items: center; gap: 14px; }
+  header .email { color: #777; font-size: 14px; }
+  button.logout { background: #eee; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+  main { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+  .course { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .course h2 { font-size: 18px; margin-bottom: 4px; }
+  .course .meta { font-size: 13px; color: #888; margin-bottom: 14px; }
+  .progressbar { height: 6px; background: #eee; border-radius: 3px; margin-bottom: 16px; overflow: hidden; }
+  .progressbar > div { height: 100%; background: #22c55e; border-radius: 3px; transition: width .4s; }
+  .video-list { display: flex; flex-direction: column; gap: 8px; }
+  .video-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid #eee;
+               border-radius: 10px; cursor: pointer; transition: background .15s; }
+  .video-row:hover { background: #f8f9ff; }
+  .video-row.locked { opacity: .5; cursor: not-allowed; }
+  .video-row.active { border-color: #667eea; background: #f0f2ff; }
+  .video-row .num { width: 28px; height: 28px; border-radius: 50%; background: #eee; color: #555;
+                    display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+  .video-row.done .num { background: #22c55e; color: #fff; }
+  .video-row .title { flex: 1; font-size: 15px; }
+  .video-row .status { font-size: 13px; color: #999; }
+  .video-row.done .status { color: #16a34a; font-weight: 600; }
+  .player-wrap { background: #000; border-radius: 12px; overflow: hidden; margin-bottom: 8px; }
+  video { width: 100%; display: block; max-height: 480px; }
+  .player-info { display: flex; justify-content: space-between; align-items: center; padding: 10px 4px; }
+  .player-info .pct { font-size: 13px; color: #666; }
+  .badge { font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 20px; display: none; }
+  .badge.complete { background: #dcfce7; color: #16a34a; display: inline-block; }
+  .hint { font-size: 13px; color: #999; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📚 My Class</h1>
+  <div class="right">
+    <span class="email" id="userEmail"></span>
+    <button class="logout" onclick="logout()">Log out</button>
+  </div>
+</header>
+
+<main>
+  <div class="player-wrap">
+    <video id="player" controls></video>
+  </div>
+  <div class="player-info">
+    <span class="pct" id="watchPct">Select a lesson below to start watching.</span>
+    <span class="badge" id="completeBadge">✓ Complete</span>
+  </div>
+  <p class="hint">A video is marked complete when you watch at least 90% of it (skipping to the end doesn't count). Finish a lesson to unlock the next one.</p>
+
+  <div id="courses"></div>
+</main>
+
+<script>
+const player   = document.getElementById('player');
+const watchPct = document.getElementById('watchPct');
+const badge    = document.getElementById('completeBadge');
+
+let courses = [];
+let progress = {};        // videoId -> { percent, completed }
+let currentVideo = null;  // the video object currently loaded
+let watchedMax = 0;       // furthest point actually watched (guards against skipping ahead)
+let saveTimer = null;
+
+/* ---------- Load everything ---------- */
+async function init() {
+  const me = await fetch('/api/me');
+  if (me.status === 401) return location.href = '/';
+  const meData = await me.json();
+  document.getElementById('userEmail').textContent = meData.email;
+  progress = meData.progress;
+
+  const c = await fetch('/api/courses');
+  courses = (await c.json()).courses;
+  render();
+}
+
+/* ---------- Render course list with locks + checkmarks ---------- */
+function isUnlocked(course, idx) {
+  if (idx === 0) return true;
+  return progress[course.videos[idx - 1].id]?.completed;
+}
+
+function render() {
+  const container = document.getElementById('courses');
+  container.innerHTML = '';
+  for (const course of courses) {
+    const doneCount = course.videos.filter(v => progress[v.id]?.completed).length;
+    const el = document.createElement('div');
+    el.className = 'course';
+    el.innerHTML = `
+      <h2>${course.title}</h2>
+      <div class="meta">${doneCount} of ${course.videos.length} lessons complete</div>
+      <div class="progressbar"><div style="width:${(doneCount / course.videos.length) * 100}%"></div></div>
+      <div class="video-list">
+        ${course.videos.map((v, i) => {
+          const done = progress[v.id]?.completed;
+          const unlocked = isUnlocked(course, i);
+          const cls = ['video-row', done ? 'done' : '', unlocked ? '' : 'locked',
+                       currentVideo?.id === v.id ? 'active' : ''].join(' ');
+          const status = done ? '✓ Complete' : (unlocked ? (progress[v.id]?.percent > 0 ? `${progress[v.id].percent}% watched` : 'Not started') : '🔒 Locked');
+          return `<div class="${cls}" data-course="${course.id}" data-video="${v.id}">
+                    <div class="num">${done ? '✓' : i + 1}</div>
+                    <div class="title">${v.title}</div>
+                    <div class="status">${status}</div>
+                  </div>`;
+        }).join('')}
+      </div>`;
+    container.appendChild(el);
+  }
+  container.querySelectorAll('.video-row:not(.locked)').forEach(row => {
+    row.addEventListener('click', () => selectVideo(row.dataset.course, row.dataset.video));
+  });
+}
+
+/* ---------- Load a video into the player ---------- */
+function selectVideo(courseId, videoId) {
+  const course = courses.find(c => c.id === courseId);
+  currentVideo = course.videos.find(v => v.id === videoId);
+  watchedMax = 0;
+  player.src = currentVideo.url;
+  player.load();
+  badge.className = 'badge';
+  badge.textContent = '✓ Complete';
+  watchPct.textContent = currentVideo.title + ' — 0% watched';
+  render();
+}
+
+/* ---------- Track watching (max position, not current position) ---------- */
+player.addEventListener('timeupdate', () => {
+  if (!currentVideo || !player.duration) return;
+  watchedMax = Math.max(watchedMax, player.currentTime);
+  const pct = Math.min(100, Math.round((watchedMax / player.duration) * 100));
+  watchPct.textContent = `${currentVideo.title} — ${pct}% watched`;
+});
+
+/* Video finished → force 100% and save */
+player.addEventListener('ended', () => saveProgress(100));
+
+/* Save progress every 5 seconds while watching (survives refresh) */
+setInterval(() => {
+  if (currentVideo && player.duration && watchedMax > 0 && !player.paused) {
+    saveProgress(Math.round((watchedMax / player.duration) * 100));
+  }
+}, 5000);
+
+/* Save on tab close / navigate away */
+window.addEventListener('pagehide', () => {
+  if (currentVideo && player.duration && watchedMax > 0) {
+    const pct = Math.min(100, Math.round((watchedMax / player.duration) * 100));
+    fetch('/api/progress', {
+      method: 'POST', keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoId: currentVideo.id, percent: pct }),
+    });
+  }
+});
+
+/* ---------- Send progress to the server ---------- */
+async function saveProgress(percent) {
+  if (!currentVideo) return;
+  const res = await fetch('/api/progress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoId: currentVideo.id, percent }),
+  });
+  if (!res.ok) return;
+  const data = await res.json();
+  progress = data.progress;
+  if (data.completed) {
+    badge.className = 'badge complete';
+    const idx = courses.flatMap(c => c.videos).findIndex(v => v.id === currentVideo.id);
+    const all = courses.flatMap(c => c.videos);
+    if (all[idx + 1]) setTimeout(() => {
+      watchPct.textContent += ' — next lesson unlocked! 🎉';
+    }, 300);
+  }
+  render();
+}
+
+/* ---------- Logout ---------- */
+async function logout() {
+  await fetch('/api/logout', { method: 'POST' });
+  location.href = '/';
+}
+
+init();
+</script>
+</body>
+</html>
